@@ -2,12 +2,13 @@
 
 from .chunking import captions_to_chunks, chunk_content_chunks
 from .embedding import ChunkEmbeddingPipeline, EmbeddingModel, StoredChunk, VectorStore
-from .metadata import Metadata, ContentChunk, Caption, CaptionKey
-from .pdf_loader import PDFLoader
-from .media_transcriber import WhisperTranscriber, TranscriptionResult
+from .hf_embedding import HuggingFaceEmbeddingModel
+from .media_transcriber import TranscriptionResult, WhisperTranscriber
+from .metadata import Caption, CaptionKey, ContentChunk, Metadata
 from .retrieval import ChunkRetriever, RetrievedChunk, SimilaritySearcher, CrossEncoder
 from .response import ResponseComposer, ResponsePayload
-from .service import RAGService, RAGServiceConfig, create_app, ServiceMetrics
+from .pdf_loader import PDFLoader
+from .service import RAGService, RAGServiceConfig, ServiceMetrics, create_app
 
 __all__ = [
     "Metadata",
@@ -23,6 +24,7 @@ __all__ = [
     "EmbeddingModel",
     "VectorStore",
     "StoredChunk",
+    "HuggingFaceEmbeddingModel",
     "ChunkRetriever",
     "RetrievedChunk",
     "SimilaritySearcher",

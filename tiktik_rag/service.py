@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Sequence
+from pathlib import Path
+from typing import Dict, List, Mapping, Sequence, Tuple
 
 try:  # pragma: no cover - optional dependency in constrained environments
     from fastapi import FastAPI, HTTPException
@@ -38,10 +39,13 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
         def routes(self) -> Dict[tuple[str, str], callable]:
             return self._routes
 
+from .chunking import captions_to_chunks, chunk_content_chunks
 from .embedding import ChunkEmbeddingPipeline, EmbeddingModel, StoredChunk
-from .metadata import ContentChunk, Metadata
+from .media_transcriber import TranscriptionResult, WhisperTranscriber
+from .metadata import Caption, ContentChunk, Metadata
 from .response import ResponseComposer, ResponsePayload
 from .retrieval import ChunkRetriever, CrossEncoder, RetrievedChunk, SimilaritySearcher
+from .pdf_loader import PDFLoader
 
 
 logger = logging.getLogger("tiktik_rag.service")
@@ -95,6 +99,28 @@ class InMemoryVectorStore:
 
     def clear_source(self, source: str) -> None:
         self.records = [record for record in self.records if record.metadata.get("source") != source]
+
+
+def _normalise_caption_mapping(
+    doc_id: str,
+    caption_payload: Mapping[int, Mapping[str, str]] | None,
+) -> List[Caption]:
+    if not caption_payload:
+        return []
+    return PDFLoader.build_captions_from_dict(doc_id, caption_payload)
+
+
+def _build_asset_lookup(
+    doc_id: str, asset_payload: Mapping[int, Mapping[str, str]] | None
+) -> Dict[Tuple[str, int, str], str]:
+    lookup: Dict[Tuple[str, int, str], str] = {}
+    if not asset_payload:
+        return lookup
+    for page_key, figure_map in asset_payload.items():
+        page = int(page_key)
+        for figure_id, asset_url in figure_map.items():
+            lookup[(doc_id, page, str(figure_id))] = str(asset_url)
+    return lookup
 
 
 def _dict_to_metadata(payload: Mapping[str, object]) -> Metadata:
@@ -200,6 +226,64 @@ class RAGService:
             "Ingested %d chunks across %d documents", len(stored), len(sources)
         )
         return len(stored)
+
+    def ingest_pdf_document(
+        self,
+        pdf_path: Path | str,
+        doc_id: str,
+        *,
+        captions: Mapping[int, Mapping[str, str]] | None = None,
+        assets: Mapping[int, Mapping[str, str]] | None = None,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+        replace_existing: bool = False,
+    ) -> int:
+        caption_objects = _normalise_caption_mapping(doc_id, captions)
+        loader = PDFLoader(pdf_path, doc_id, caption_objects)
+        page_chunks, caption_map = loader.load()
+        text_chunks = chunk_content_chunks(
+            page_chunks, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        )
+        asset_lookup = _build_asset_lookup(doc_id, assets)
+        caption_chunks = captions_to_chunks(caption_map.values(), asset_lookup=asset_lookup)
+        all_chunks = list(text_chunks) + list(caption_chunks)
+        return self.ingest(all_chunks, replace_existing=replace_existing)
+
+    def ingest_media_transcript(
+        self,
+        media_path: Path | str,
+        file_id: str,
+        *,
+        model_name: str = "base",
+        word_timestamps: bool = False,
+        replace_existing: bool = False,
+        chunk_size: int | None = 1000,
+        chunk_overlap: int = 200,
+        transcribe_kwargs: Mapping[str, object] | None = None,
+        load_kwargs: Mapping[str, object] | None = None,
+    ) -> Tuple[TranscriptionResult, int]:
+        transcriber = WhisperTranscriber(model_name=model_name, **dict(load_kwargs or {}))
+        result = transcriber.transcribe(
+            media_path,
+            file_id,
+            word_timestamps=word_timestamps,
+            **dict(transcribe_kwargs or {}),
+        )
+
+        ingest_chunks: Sequence[ContentChunk]
+        if chunk_size is not None:
+            ingest_chunks = chunk_content_chunks(
+                result.chunks,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+        else:
+            ingest_chunks = result.chunks
+
+        ingested = self.ingest(ingest_chunks, replace_existing=replace_existing)
+        if ingest_chunks is not result.chunks:
+            result = TranscriptionResult(text=result.text, chunks=list(ingest_chunks), raw=result.raw)
+        return result, ingested
 
     def batch_reindex(self, documents: Mapping[str, Sequence[ContentChunk]]) -> Dict[str, int]:
         results: Dict[str, int] = {}
@@ -317,6 +401,96 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="top_k must be a positive integer")
         payload = service.query(query_text, top_k=top_k if isinstance(top_k, int) else None)
         return {"answer": payload.answer, "citations": payload.citations, "assets": payload.assets}
+
+    def _parse_nested_mapping(name: str, payload: object) -> Mapping[int, Mapping[str, str]] | None:
+        if payload is None:
+            return None
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status_code=400, detail=f"{name} must be an object keyed by page")
+        normalised: Dict[int, Dict[str, str]] = {}
+        for page_key, figure_map in payload.items():
+            try:
+                page = int(page_key)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{name} keys must be integers") from None
+            if not isinstance(figure_map, Mapping):
+                raise HTTPException(status_code=400, detail=f"{name}[{page}] must be an object of figure -> value")
+            normalised[page] = {str(figure): str(value) for figure, value in figure_map.items()}
+        return normalised
+
+    @app.post("/ingest/pdf")
+    def ingest_pdf(request: Dict[str, object]) -> Dict[str, object]:
+        pdf_path = request.get("pdf_path")
+        doc_id = request.get("doc_id")
+        if not isinstance(pdf_path, str) or not pdf_path.strip():
+            raise HTTPException(status_code=400, detail="pdf_path must be a non-empty string")
+        if not isinstance(doc_id, str) or not doc_id.strip():
+            raise HTTPException(status_code=400, detail="doc_id must be a non-empty string")
+        captions = _parse_nested_mapping("captions", request.get("captions"))
+        assets = _parse_nested_mapping("assets", request.get("assets"))
+        chunk_size = int(request.get("chunk_size", 1000) or 1000)
+        chunk_overlap = int(request.get("chunk_overlap", 200) or 0)
+        replace_existing = bool(request.get("replace_existing", False))
+
+        try:
+            ingested = service.ingest_pdf_document(
+                pdf_path,
+                doc_id,
+                captions=captions,
+                assets=assets,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                replace_existing=replace_existing,
+            )
+        except RuntimeError as exc:  # pragma: no cover - dependency errors
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return {"ingested": ingested, "metrics": service.metrics_snapshot()}
+
+    @app.post("/ingest/media")
+    def ingest_media(request: Dict[str, object]) -> Dict[str, object]:
+        media_path = request.get("media_path")
+        file_id = request.get("file_id")
+        if not isinstance(media_path, str) or not media_path.strip():
+            raise HTTPException(status_code=400, detail="media_path must be a non-empty string")
+        if not isinstance(file_id, str) or not file_id.strip():
+            raise HTTPException(status_code=400, detail="file_id must be a non-empty string")
+
+        model_name = str(request.get("model_name", "base"))
+        word_timestamps = bool(request.get("word_timestamps", False))
+        replace_existing = bool(request.get("replace_existing", False))
+        chunk_size_raw = request.get("chunk_size", 1000)
+        chunk_size = int(chunk_size_raw) if chunk_size_raw is not None else None
+        chunk_overlap = int(request.get("chunk_overlap", 200) or 0)
+
+        transcribe_kwargs = request.get("transcribe_kwargs") or {}
+        load_kwargs = request.get("load_kwargs") or {}
+        if not isinstance(transcribe_kwargs, Mapping):
+            raise HTTPException(status_code=400, detail="transcribe_kwargs must be an object if provided")
+        if not isinstance(load_kwargs, Mapping):
+            raise HTTPException(status_code=400, detail="load_kwargs must be an object if provided")
+
+        try:
+            result, ingested = service.ingest_media_transcript(
+                media_path,
+                file_id,
+                model_name=model_name,
+                word_timestamps=word_timestamps,
+                replace_existing=replace_existing,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                transcribe_kwargs=transcribe_kwargs,
+                load_kwargs=load_kwargs,
+            )
+        except RuntimeError as exc:  # pragma: no cover - dependency errors
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return {
+            "ingested": ingested,
+            "transcript": result.text,
+            "segments": [chunk.as_record() for chunk in result.chunks],
+            "metrics": service.metrics_snapshot(),
+        }
 
     @app.get("/metrics")
     def metrics() -> Dict[str, int]:
