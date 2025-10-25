@@ -36,3 +36,183 @@ Run the test suite with:
 ```bash
 pytest
 ```
+
+## API Endpoints
+
+All endpoints expect and return JSON payloads. Unless otherwise noted, responses include a `metrics` object with running totals of documents, chunks, and queries processed by the service.
+
+### `POST /ingest`
+
+Bulk-ingest pre-chunked content. Use this when you have already prepared `text` + `metadata` pairs.
+
+**Request body**
+
+```json
+{
+  "chunks": [
+    {
+      "text": "Chunk body text",
+      "metadata": {
+        "source": "dataset-name",
+        "page": 3,
+        "figure": "2A",
+        "timestamp_start": 12.5,
+        "timestamp_end": 24.0,
+        "asset_url": "https://example.com/fig-2A.png"
+      }
+    }
+  ],
+  "replace_existing": false
+}
+```
+
+**Response body**
+
+```json
+{
+  "ingested": 1,
+  "metrics": {"ingested_documents": 0, "ingested_chunks": 1, "queries": 0}
+}
+```
+
+### `POST /reindex`
+
+Rebuild stored embeddings for one or more sources. Provide the full set of chunks per `source`.
+
+**Request body**
+
+```json
+{
+  "documents": [
+    {
+      "source": "dataset-name",
+      "chunks": [
+        {"text": "Chunk body text", "metadata": {"source": "dataset-name"}}
+      ]
+    }
+  ]
+}
+```
+
+**Response body**
+
+```json
+{
+  "results": {"dataset-name": 1},
+  "metrics": {"ingested_documents": 0, "ingested_chunks": 1, "queries": 0}
+}
+```
+
+### `POST /query`
+
+Retrieve an answer and contextual citations.
+
+**Request body**
+
+```json
+{
+  "query": "What does the paper say about evaluation?",
+  "top_k": 5
+}
+```
+
+**Response body**
+
+```json
+{
+  "answer": "Summary generated from retrieved chunks...",
+  "citations": [
+    {
+      "text": "Supporting chunk text",
+      "metadata": {
+        "source": "dataset-name",
+        "page": 3,
+        "figure": "2A",
+        "timestamp_start": 12.5,
+        "timestamp_end": 24.0,
+        "asset_url": "https://example.com/fig-2A.png"
+      }
+    }
+  ],
+  "assets": [
+    {"source": "dataset-name", "page": 3, "figure": "2A", "asset_url": "https://example.com/fig-2A.png"}
+  ]
+}
+```
+
+### `POST /ingest/pdf`
+
+Parse a PDF on disk, chunk its content, and index it. Optionally attach caption or asset metadata keyed by page and figure.
+
+**Request body**
+
+```json
+{
+  "pdf_path": "/path/to/paper.pdf",
+  "doc_id": "paper-2024",
+  "captions": {"1": {"A": "Figure caption"}},
+  "assets": {"1": {"A": "https://example.com/figure-a.png"}},
+  "chunk_size": 1000,
+  "chunk_overlap": 200,
+  "replace_existing": false
+}
+```
+
+**Response body**
+
+```json
+{
+  "doc_id": "paper-2024",
+  "ingested": 42,
+  "captions": {"1": {"A": "Figure caption"}},
+  "metrics": {"ingested_documents": 1, "ingested_chunks": 42, "queries": 0}
+}
+```
+
+### `POST /ingest/media`
+
+Transcribe an audio or video file with Whisper, chunk the transcript, and index it.
+
+**Request body**
+
+```json
+{
+  "media_path": "/path/to/podcast.mp3",
+  "file_id": "podcast-episode",
+  "model_name": "base",
+  "word_timestamps": false,
+  "chunk_size": 1000,
+  "chunk_overlap": 200,
+  "replace_existing": false,
+  "transcribe_kwargs": {"language": "en"},
+  "load_kwargs": {}
+}
+```
+
+**Response body**
+
+```json
+{
+  "file_id": "podcast-episode",
+  "ingested": 64,
+  "transcript": "Full transcript text...",
+  "segments": [
+    {"text": "Segment text", "metadata": {"source": "podcast-episode", "timestamp_start": 0.0}}
+  ],
+  "metrics": {"ingested_documents": 1, "ingested_chunks": 64, "queries": 0}
+}
+```
+
+### `GET /metrics`
+
+Return cumulative service metrics.
+
+**Response body**
+
+```json
+{
+  "ingested_documents": 2,
+  "ingested_chunks": 107,
+  "queries": 5
+}
+```
