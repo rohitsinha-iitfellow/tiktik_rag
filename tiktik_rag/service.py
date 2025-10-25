@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import math
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 try:  # pragma: no cover - optional dependency in constrained environments
     from fastapi import FastAPI, HTTPException
@@ -43,9 +44,9 @@ from .chunking import captions_to_chunks, chunk_content_chunks
 from .embedding import ChunkEmbeddingPipeline, EmbeddingModel, StoredChunk
 from .media_transcriber import TranscriptionResult, WhisperTranscriber
 from .metadata import Caption, ContentChunk, Metadata
+from .pdf_loader import PDFLoader
 from .response import ResponseComposer, ResponsePayload
 from .retrieval import ChunkRetriever, CrossEncoder, RetrievedChunk, SimilaritySearcher
-from .pdf_loader import PDFLoader
 
 
 logger = logging.getLogger("tiktik_rag.service")
@@ -85,6 +86,75 @@ class ServiceMetrics:
             "ingested_chunks": self.ingested_chunks,
             "queries": self.queries,
         }
+
+
+@dataclass(frozen=True)
+class DocumentRecord:
+    """Metadata describing an uploaded source document."""
+
+    doc_id: str
+    kind: str
+    source_path: str
+    captions: Dict[int, Dict[str, str]]
+
+
+class DocumentRegistry:
+    """Assign and track unique identifiers for uploaded documents."""
+
+    def __init__(self) -> None:
+        self._records: Dict[str, DocumentRecord] = {}
+
+    def _generate_id(self, prefix: str) -> str:
+        return f"{prefix}-{uuid.uuid4().hex}"
+
+    def register(
+        self,
+        *,
+        kind: str,
+        source_path: Path | str,
+        requested_id: Optional[str] = None,
+        captions: Optional[Mapping[int, Mapping[str, str]]] = None,
+        replace_existing: bool = False,
+    ) -> DocumentRecord:
+        doc_id = (requested_id or self._generate_id(kind)).strip()
+        if not doc_id:
+            raise ValueError("document id must be a non-empty string")
+        if not replace_existing and doc_id in self._records:
+            raise ValueError(f"document with id '{doc_id}' is already registered")
+
+        normalised_captions: Dict[int, Dict[str, str]] = {}
+        for page, figure_map in (captions or {}).items():
+            normalised_captions[int(page)] = {str(figure): str(text) for figure, text in figure_map.items()}
+
+        record = DocumentRecord(
+            doc_id=doc_id,
+            kind=kind,
+            source_path=str(source_path),
+            captions=normalised_captions,
+        )
+        self._records[doc_id] = record
+        return record
+
+    def get(self, doc_id: str) -> DocumentRecord:
+        return self._records[doc_id]
+
+
+@dataclass(frozen=True)
+class DocumentIngestionResult:
+    """Outcome information after ingesting a document."""
+
+    doc_id: str
+    ingested_chunks: int
+    caption_index: Dict[int, Dict[str, str]]
+
+
+@dataclass(frozen=True)
+class MediaIngestionResult:
+    """Outcome information after ingesting an audio or video asset."""
+
+    file_id: str
+    ingested_chunks: int
+    transcription: TranscriptionResult
 
 
 class InMemoryVectorStore:
@@ -197,6 +267,7 @@ class RAGService:
         self.metrics = ServiceMetrics()
         self.vector_store = InMemoryVectorStore()
         self.embedding_model = embedding_model
+        self.document_registry = DocumentRegistry()
         self.pipeline = ChunkEmbeddingPipeline(
             embedding_model,
             self.vector_store,
@@ -230,24 +301,37 @@ class RAGService:
     def ingest_pdf_document(
         self,
         pdf_path: Path | str,
-        doc_id: str,
+        doc_id: str | None = None,
         *,
         captions: Mapping[int, Mapping[str, str]] | None = None,
         assets: Mapping[int, Mapping[str, str]] | None = None,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
         replace_existing: bool = False,
-    ) -> int:
-        caption_objects = _normalise_caption_mapping(doc_id, captions)
-        loader = PDFLoader(pdf_path, doc_id, caption_objects)
+    ) -> DocumentIngestionResult:
+        registration = self.document_registry.register(
+            kind="pdf",
+            source_path=pdf_path,
+            requested_id=doc_id,
+            captions=captions,
+            replace_existing=replace_existing,
+        )
+        resolved_doc_id = registration.doc_id
+        caption_objects = _normalise_caption_mapping(resolved_doc_id, captions)
+        loader = PDFLoader(pdf_path, resolved_doc_id, caption_objects)
         page_chunks, caption_map = loader.load()
         text_chunks = chunk_content_chunks(
             page_chunks, chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
-        asset_lookup = _build_asset_lookup(doc_id, assets)
+        asset_lookup = _build_asset_lookup(resolved_doc_id, assets)
         caption_chunks = captions_to_chunks(caption_map.values(), asset_lookup=asset_lookup)
         all_chunks = list(text_chunks) + list(caption_chunks)
-        return self.ingest(all_chunks, replace_existing=replace_existing)
+        ingested = self.ingest(all_chunks, replace_existing=replace_existing)
+        return DocumentIngestionResult(
+            doc_id=resolved_doc_id,
+            ingested_chunks=ingested,
+            caption_index=dict(registration.captions),
+        )
 
     def ingest_media_transcript(
         self,
@@ -261,11 +345,18 @@ class RAGService:
         chunk_overlap: int = 200,
         transcribe_kwargs: Mapping[str, object] | None = None,
         load_kwargs: Mapping[str, object] | None = None,
-    ) -> Tuple[TranscriptionResult, int]:
+    ) -> MediaIngestionResult:
+        registration = self.document_registry.register(
+            kind="media",
+            source_path=media_path,
+            requested_id=file_id,
+            replace_existing=replace_existing,
+        )
+        resolved_file_id = registration.doc_id
         transcriber = WhisperTranscriber(model_name=model_name, **dict(load_kwargs or {}))
         result = transcriber.transcribe(
             media_path,
-            file_id,
+            resolved_file_id,
             word_timestamps=word_timestamps,
             **dict(transcribe_kwargs or {}),
         )
@@ -283,7 +374,11 @@ class RAGService:
         ingested = self.ingest(ingest_chunks, replace_existing=replace_existing)
         if ingest_chunks is not result.chunks:
             result = TranscriptionResult(text=result.text, chunks=list(ingest_chunks), raw=result.raw)
-        return result, ingested
+        return MediaIngestionResult(
+            file_id=resolved_file_id,
+            ingested_chunks=ingested,
+            transcription=result,
+        )
 
     def batch_reindex(self, documents: Mapping[str, Sequence[ContentChunk]]) -> Dict[str, int]:
         results: Dict[str, int] = {}
@@ -421,11 +516,15 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     @app.post("/ingest/pdf")
     def ingest_pdf(request: Dict[str, object]) -> Dict[str, object]:
         pdf_path = request.get("pdf_path")
-        doc_id = request.get("doc_id")
+        doc_id_raw = request.get("doc_id")
         if not isinstance(pdf_path, str) or not pdf_path.strip():
             raise HTTPException(status_code=400, detail="pdf_path must be a non-empty string")
-        if not isinstance(doc_id, str) or not doc_id.strip():
-            raise HTTPException(status_code=400, detail="doc_id must be a non-empty string")
+        if doc_id_raw is None:
+            doc_id = None
+        elif isinstance(doc_id_raw, str) and doc_id_raw.strip():
+            doc_id = doc_id_raw
+        else:
+            raise HTTPException(status_code=400, detail="doc_id must be a non-empty string if provided")
         captions = _parse_nested_mapping("captions", request.get("captions"))
         assets = _parse_nested_mapping("assets", request.get("assets"))
         chunk_size = int(request.get("chunk_size", 1000) or 1000)
@@ -433,7 +532,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         replace_existing = bool(request.get("replace_existing", False))
 
         try:
-            ingested = service.ingest_pdf_document(
+            result = service.ingest_pdf_document(
                 pdf_path,
                 doc_id,
                 captions=captions,
@@ -442,19 +541,30 @@ def create_app(service: RAGService | None = None) -> FastAPI:
                 chunk_overlap=chunk_overlap,
                 replace_existing=replace_existing,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:  # pragma: no cover - dependency errors
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        return {"ingested": ingested, "metrics": service.metrics_snapshot()}
+        return {
+            "doc_id": result.doc_id,
+            "ingested": result.ingested_chunks,
+            "captions": result.caption_index,
+            "metrics": service.metrics_snapshot(),
+        }
 
     @app.post("/ingest/media")
     def ingest_media(request: Dict[str, object]) -> Dict[str, object]:
         media_path = request.get("media_path")
-        file_id = request.get("file_id")
+        file_id_raw = request.get("file_id")
         if not isinstance(media_path, str) or not media_path.strip():
             raise HTTPException(status_code=400, detail="media_path must be a non-empty string")
-        if not isinstance(file_id, str) or not file_id.strip():
-            raise HTTPException(status_code=400, detail="file_id must be a non-empty string")
+        if file_id_raw is None:
+            file_id = None
+        elif isinstance(file_id_raw, str) and file_id_raw.strip():
+            file_id = file_id_raw
+        else:
+            raise HTTPException(status_code=400, detail="file_id must be a non-empty string if provided")
 
         model_name = str(request.get("model_name", "base"))
         word_timestamps = bool(request.get("word_timestamps", False))
@@ -471,7 +581,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="load_kwargs must be an object if provided")
 
         try:
-            result, ingested = service.ingest_media_transcript(
+            result = service.ingest_media_transcript(
                 media_path,
                 file_id,
                 model_name=model_name,
@@ -482,13 +592,16 @@ def create_app(service: RAGService | None = None) -> FastAPI:
                 transcribe_kwargs=transcribe_kwargs,
                 load_kwargs=load_kwargs,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:  # pragma: no cover - dependency errors
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         return {
-            "ingested": ingested,
-            "transcript": result.text,
-            "segments": [chunk.as_record() for chunk in result.chunks],
+            "file_id": result.file_id,
+            "ingested": result.ingested_chunks,
+            "transcript": result.transcription.text,
+            "segments": [chunk.as_record() for chunk in result.transcription.chunks],
             "metrics": service.metrics_snapshot(),
         }
 
@@ -500,6 +613,8 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
 
 __all__ = [
+    "DocumentIngestionResult",
+    "MediaIngestionResult",
     "RAGService",
     "RAGServiceConfig",
     "create_app",
