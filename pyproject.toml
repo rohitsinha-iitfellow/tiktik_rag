@@ -9,7 +9,10 @@ description = "Data ingestion utilities for TikTik RAG"
 readme = "README.md"
 authors = [{name = "TikTik"}]
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.23,<1.0",
+]
 
 [project.optional-dependencies]
 ingestion = [
