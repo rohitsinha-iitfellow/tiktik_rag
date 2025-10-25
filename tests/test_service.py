@@ -5,7 +5,13 @@ from typing import Dict, List, Sequence
 from tiktik_rag.embedding import StoredChunk
 from tiktik_rag.media_transcriber import TranscriptionResult
 from tiktik_rag.metadata import ContentChunk, Metadata
-from tiktik_rag.service import RAGService, RAGServiceConfig, create_app
+from tiktik_rag.service import (
+    DocumentIngestionResult,
+    MediaIngestionResult,
+    RAGService,
+    RAGServiceConfig,
+    create_app,
+)
 
 
 class SimpleResponse:
@@ -168,7 +174,7 @@ def test_ingest_pdf_endpoint_invokes_service():
         captured["pdf_path"] = pdf_path
         captured["doc_id"] = doc_id
         captured["kwargs"] = kwargs
-        return 7
+        return DocumentIngestionResult(doc_id="doc-123", ingested_chunks=7, caption_index={1: {"A": "Caption text"}})
 
     service.ingest_pdf_document = fake_ingest_pdf_document  # type: ignore[assignment]
 
@@ -187,7 +193,9 @@ def test_ingest_pdf_endpoint_invokes_service():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["doc_id"] == "doc-123"
     assert payload["ingested"] == 7
+    assert payload["captions"] == {1: {"A": "Caption text"}}
     assert captured["pdf_path"] == "/tmp/doc.pdf"
     assert captured["doc_id"] == "doc-123"
     assert captured["kwargs"]["captions"] == {1: {"A": "Caption text"}}
@@ -195,6 +203,30 @@ def test_ingest_pdf_endpoint_invokes_service():
     assert captured["kwargs"]["chunk_size"] == 500
     assert captured["kwargs"]["chunk_overlap"] == 50
     assert captured["kwargs"]["replace_existing"] is True
+
+
+def test_ingest_pdf_endpoint_generates_identifier_when_missing():
+    model = KeywordEmbeddingModel()
+    service = RAGService(model)
+    app = create_app(service)
+    client = SimpleTestClient(app)
+
+    captured: Dict[str, object] = {}
+
+    def fake_ingest_pdf_document(pdf_path, doc_id, **kwargs):
+        captured["doc_id"] = doc_id
+        return DocumentIngestionResult(doc_id="auto-generated", ingested_chunks=1, caption_index={})
+
+    service.ingest_pdf_document = fake_ingest_pdf_document  # type: ignore[assignment]
+
+    response = client.post("/ingest/pdf", json={"pdf_path": "/tmp/doc.pdf"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["doc_id"] == "auto-generated"
+    assert payload["ingested"] == 1
+    assert payload["captions"] == {}
+    assert captured["doc_id"] is None
 
 
 def test_ingest_media_endpoint_invokes_service():
@@ -214,7 +246,11 @@ def test_ingest_media_endpoint_invokes_service():
         captured["media_path"] = media_path
         captured["file_id"] = file_id
         captured["kwargs"] = kwargs
-        return transcript_result, 3
+        return MediaIngestionResult(
+            file_id="audio-1",
+            ingested_chunks=3,
+            transcription=transcript_result,
+        )
 
     service.ingest_media_transcript = fake_ingest_media_transcript  # type: ignore[assignment]
 
@@ -235,6 +271,7 @@ def test_ingest_media_endpoint_invokes_service():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["file_id"] == "audio-1"
     assert payload["ingested"] == 3
     assert payload["transcript"] == "hello"
     assert len(payload["segments"]) == 1
@@ -247,4 +284,39 @@ def test_ingest_media_endpoint_invokes_service():
     assert captured["kwargs"]["chunk_size"] is None
     assert captured["kwargs"]["transcribe_kwargs"] == {"temperature": 0.2}
     assert captured["kwargs"]["load_kwargs"] == {"device": "cpu"}
+
+
+def test_ingest_media_endpoint_generates_identifier_when_missing():
+    model = KeywordEmbeddingModel()
+    service = RAGService(model)
+    app = create_app(service)
+    client = SimpleTestClient(app)
+
+    captured: Dict[str, object] = {}
+
+    def fake_ingest_media_transcript(media_path, file_id, **kwargs):
+        captured["file_id"] = file_id
+        return MediaIngestionResult(
+            file_id="auto-file",
+            ingested_chunks=2,
+            transcription=TranscriptionResult(text="hi", chunks=[], raw={}),
+        )
+
+    service.ingest_media_transcript = fake_ingest_media_transcript  # type: ignore[assignment]
+
+    response = client.post(
+        "/ingest/media",
+        json={
+            "media_path": "/tmp/video.mp4",
+            "model_name": "base",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file_id"] == "auto-file"
+    assert payload["ingested"] == 2
+    assert payload["transcript"] == "hi"
+    assert payload["segments"] == []
+    assert captured["file_id"] is None
 
