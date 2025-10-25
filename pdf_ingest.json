@@ -1,0 +1,314 @@
+{
+  "0": {
+    "A": "NAGFORM's Way of Design"
+  },
+  "8": {
+    "A": "NAGFORM Desktop Window for User Interface"
+  },
+  "11": {
+    "A": "Help Menu Dialog Box",
+    "B": "Help Topics",
+    "C": "Simple Calculator"
+  },
+  "12": {
+    "A": "Surface Area Calculation"
+  },
+  "13": {
+    "A": "Various Primitives For Creating Part Model"
+  },
+  "14": {
+    "A": "Created Primitives in Order of Joining to Form the Part"
+  },
+  "16": {
+    "A": "Modifying a Union to Create Corner Radius, Chamfer and Fillet"
+  },
+  "17": {
+    "A": "Subtraction of Primitives from a Union",
+    "B": "Bringing in Part and/or Part Design Template in Current File"
+  },
+  "18": {
+    "A": "Display of Dimensions of a part in NAGFORM"
+  },
+  "19": {
+    "A": "Assigning a Material to a Part in NAGFORM"
+  },
+  "22": {
+    "A": "Progression Design Setup Dialogbox"
+  },
+  "23": {
+    "A": "Forming Rules of Forward Extrusion Process of Rod or Wire",
+    "B": "Progression Design Rules for the Heading Process of Rod or Wire",
+    "C": "Second and Final Page of Progression Design Rules for the Heading Process of Rod or Wire"
+  },
+  "24": {
+    "A": "Progression Design Using a Radiused Preform",
+    "B": "Design Rules of the Trimming Process",
+    "C": "Progression Design of a Double End Bolt"
+  },
+  "25": {
+    "A": "Progression Design Dialog Box"
+  },
+  "26": {
+    "A": "Design Summary and Machine Selection Summary"
+  },
+  "27": {
+    "A": "Selecting Automatic Design for a Specific Header Machine"
+  },
+  "28": {
+    "A": "Creation of Default Tooling for a Sequence Design",
+    "B": "Creation of Analysis File for Simulation in NAGSIM.2D"
+  },
+  "29": {
+    "A": "Dialog Box for Maintaining a Database of Available Forging Machines"
+  },
+  "30": {
+    "A": "Form to Store Pertinent Information of Forging Machine",
+    "B": "Display of Machine Selection related Details in NAGFORM"
+  },
+  "31": {
+    "A": "Display of Design Helper Selection"
+  },
+  "32": {
+    "A": "Design Helper Form Displaying All Methods to Get Designs"
+  },
+  "33": {
+    "A": "Display of Results of Methods Used to Get Designs",
+    "B": "Design Helper Form To Reduce Number of Sequence Designs"
+  },
+  "34": {
+    "A": "Design Helper Form To Reduce Number of Operations",
+    "B": "Blank Size And Weight Calculation"
+  },
+  "36": {
+    "A": "Method of Creating a Model of the Part"
+  },
+  "38": {
+    "A": "Designing Forming Sequences Using the Part Model"
+  },
+  "39": {
+    "A": "Manual Design Set Up Form"
+  },
+  "40": {
+    "A": "Form for Manual Design Modifications"
+  },
+  "41": {
+    "A": "Dialog Box for Preform Modifications",
+    "B": "Manual Design Using 'Design by Command'"
+  },
+  "43": {
+    "A": "Design by Command Setup Form",
+    "B": "Design by Command Main Dialog Box"
+  },
+  "45": {
+    "A": "New File Dialog Box",
+    "B": "Dialog Box showing saved representative part files and their Session files"
+  },
+  "46": {
+    "A": "Example part for Sequence Design using Design by Command",
+    "B": "Similar Part for Which Session File of Desired Design is Available"
+  },
+  "47": {
+    "A": "Figure 5 Displaying the Contents of Selected Session File"
+  },
+  "51": {
+    "A": "Pictures shows Display of Information from Smart Database"
+  },
+  "52": {
+    "A": "Starting Smart Database",
+    "B": "Smart Database Display",
+    "C": "Save Data in Smalrt Database"
+  },
+  "53": {
+    "A": "Details of User Record"
+  },
+  "54": {
+    "A": "Form to Maintain Lessons Learnt"
+  },
+  "55": {
+    "A": "Information To Maintain at Quoting Stage and Manufacuring Stage"
+  },
+  "56": {
+    "A": "Summary of Records in Smart Database"
+  },
+  "57": {
+    "A": "Search of Information in Smart Database"
+  },
+  "58": {
+    "A": "Display of Material Usage from Records of Smart Database"
+  },
+  "59": {
+    "A": "Plot of Frequency of Usage of Materials From Smart Database",
+    "B": "Plot of Wire Usage from Search of Smart Database"
+  },
+  "60": {
+    "A": "Search of Usage of Forming Machines  in Smart Database",
+    "B": "Options of Search Related to Cost In Smart Database"
+  },
+  "61": {
+    "A": "Image Shows Options Related to Tool Life Search in Smart Database",
+    "B": "Search of Lessons Learnt Using Smart Database"
+  },
+  "62": {
+    "A": "Sequence Design Search For a Part Using Records of Smart Database"
+  },
+  "63": {
+    "A": "Image shows Part Search Capabilities of Smart Database"
+  },
+  "64": {
+    "A": "Standard Tooling Components in Tool Design Module of NAGFORM"
+  },
+  "65": {
+    "A": "Standard Tooling Components in Tool Design Module of NAGFORM (Further Development in NAGTOOL)",
+    "B": "Image Displaying 'Auto Tool' Module of NAGFORM And Tool Bar (Further Development in NAGTOOL)",
+    "C": "Selection of Tool Component (Further Development in NAGTOOL)"
+  },
+  "66": {
+    "A": "Creating  Tool Component by Entering Dimensions",
+    "B": "Creating  Tool Component by Entering Dimensions"
+  },
+  "67": {
+    "A": "Adding Constraints on Dimensions"
+  },
+  "68": {
+    "A": "Creating DXG Drawing from Tool Component Diemensions"
+  },
+  "69": {
+    "A": "Drawing Preference Dialog Box"
+  },
+  "70": {
+    "A": "Searching for Similar Tool Components",
+    "B": "Construction of External Tool Component"
+  },
+  "71": {
+    "A": "Creating External DXF Tool",
+    "B": "Procedure to Create External DXF Tool"
+  },
+  "72": {
+    "A": "Setup for Constructing Tool Assemblies",
+    "B": "Setup for  Tool assembly"
+  },
+  "73": {
+    "A": "Procedure to Create Tool Assembly"
+  },
+  "74": {
+    "A": "Inserting Tool Components in Tool Assembly"
+  },
+  "75": {
+    "A": "Commands to Facilitate Tool Assembly"
+  },
+  "76": {
+    "A": "Selection of a Tool Component From a Group of Tools",
+    "B": "Move a Tool Component From Current Position",
+    "C": "Create a Mirror Copy of a Tool Component"
+  },
+  "77": {
+    "A": "Create a Dupilcate Copy of a Tool Compoment",
+    "B": "Rename a Tool Component",
+    "C": "Draw a Tool With Hatch Lines"
+  },
+  "78": {
+    "A": "Show Coordinates of any Entity of the Tool",
+    "B": "Modify a Tool"
+  },
+  "79": {
+    "A": "Appying a Constraint to Align a Tool  to Centerline of Tool Assembly",
+    "B": "Applying a Constraint to Align a Tool To Punch Face",
+    "C": "Aligning a Tool To Punch Line"
+  },
+  "80": {
+    "A": "Mate Faces of Two Tools in Assembly",
+    "B": "Mate Faces of Two Tools in Assembly - Another Image"
+  },
+  "81": {
+    "A": "Equation Constraint Between a Tool and Other Tools in Assembly",
+    "B": "An Example of The Equation Constraint"
+  },
+  "82": {
+    "A": "Another Example of The Equation Constraint",
+    "B": "Another Example of Using Constraint Through Equation",
+    "C": "Another Example of a Situation Where Equation Constraint is Applied"
+  },
+  "83": {
+    "A": "Deleting a Constraint",
+    "B": "Applying and Deleting Assenbly Dimensions"
+  },
+  "84": {
+    "A": "Creating DXF Drawings of Assembly And Tools",
+    "B": "An Example of Tooling Assembly"
+  },
+  "85": {
+    "A": "Auto Design of Tooling From Part Progression - in Development"
+  },
+  "86": {
+    "A": "General Features - Preview of Part Geometry"
+  },
+  "87": {
+    "A": "General Fatures: Part Library - has NAGFORM Part Models of Cold Forged Parts",
+    "B": "General Features: Search Of Similar Parts"
+  },
+  "88": {
+    "A": "General Features: 6 Lobe External and Internal Primitives",
+    "B": "General Features: Adding Comments in Nagform"
+  },
+  "89": {
+    "A": "General Features: Rendering"
+  },
+  "90": {
+    "A": "General Features: User's Database - Search of Similar Parts and Designs",
+    "B": "General Features: Tool Design Help",
+    "C": "General Features: Multi Ring Assembly"
+  },
+  "91": {
+    "A": "General Features: Multi Ring Assembly ( Contd)",
+    "B": "General Features: Interference Fit Calculations"
+  },
+  "93": {
+    "A": "Tech. Paper:  Create and Use a Historic Knowledge Database of Parts and Designs (1)",
+    "B": "Tech. Paper:  Create and Use a Historic Knowledge Database of Parts and Designs (2)"
+  },
+  "97": {
+    "A": "Nagform Enhancements: Auto Design - Ball Type Heading Preform",
+    "B": "Nagform Enhancements: Auto Design - Example of Ball Type Heading Preform"
+  },
+  "98": {
+    "A": "Nagform Enhancements: Auto Design - Another Example of Ball Type Heading Preform"
+  },
+  "99": {
+    "A": "Nagform Enhancements: Auto Design - Auto Search of Similar Parts and Designs"
+  },
+  "100": {
+    "A": "Nagform Enhancements: Model -Floating Menu  (Example 1)",
+    "B": "Nagform Enhancements: Model -Floating Menu  (Example 2)"
+  },
+  "101": {
+    "A": "Nagform Enhancements: Model -Floating Menu  (Example 3)",
+    "B": "Nagform Enhancements: Floating Menu in Auto Design"
+  },
+  "102": {
+    "A": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 1)"
+  },
+  "103": {
+    "A": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 2)",
+    "B": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 3)",
+    "C": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 4)"
+  },
+  "104": {
+    "A": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 5)",
+    "B": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 6)",
+    "C": "Nagform Enhancements: Design By Command - Graphical Input and Design (Image 7)"
+  },
+  "105": {
+    "A": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 8)",
+    "B": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 9)",
+    "C": "Nagform Enhancements: Design By Command - Graphical Input and Design (Image10)"
+  },
+  "106": {
+    "A": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image 11)",
+    "B": "Nagform Enhancements: Design By Command - Graphical Input and Design(Image12)",
+    "C": "Nagform Enhancements: Surface Area Calculations"
+  },
+  "107": {
+    "A": "Nagform Enhancements: Other Improvement",
+    "B": "Nagform Enhancements: Integration with NAGSIM.2D / 3D"
+  }
+}
