@@ -6,7 +6,7 @@ import math
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Type, TypeVar, TYPE_CHECKING
 
 try:  # pragma: no cover - optional dependency in constrained environments
     from fastapi import FastAPI, HTTPException
@@ -47,6 +47,80 @@ from .metadata import Caption, ContentChunk, Metadata
 from .pdf_loader import PDFLoader
 from .response import ResponseComposer, ResponsePayload
 from .retrieval import ChunkRetriever, CrossEncoder, RetrievedChunk, SimilaritySearcher
+
+try:  # pragma: no cover - optional dependency in constrained environments
+    from pydantic import BaseModel, ValidationError
+except ModuleNotFoundError:  # pragma: no cover - fallback when Pydantic unavailable
+    BaseModel = object  # type: ignore[assignment]
+    ValidationError = Exception  # type: ignore[assignment]
+    HAS_PYDANTIC = False
+else:
+    HAS_PYDANTIC = True
+
+if TYPE_CHECKING:
+    from .schemas import (
+        ChunkPayload,
+        IngestRequest,
+        IngestResponse,
+        MediaIngestRequest,
+        MediaIngestResponse,
+        PDFIngestRequest,
+        PDFIngestResponse,
+        QueryRequest,
+        QueryResponse,
+        ReindexRequest,
+        ReindexResponse,
+    )
+
+if HAS_PYDANTIC:
+    from .schemas import (
+        ChunkPayload,
+        IngestRequest,
+        IngestResponse,
+        MediaIngestRequest,
+        MediaIngestResponse,
+        PDFIngestRequest,
+        PDFIngestResponse,
+        QueryRequest,
+        QueryResponse,
+        ReindexRequest,
+        ReindexResponse,
+    )
+
+    ModelT = TypeVar("ModelT", bound=BaseModel)
+
+    def _parse_model(
+        payload: BaseModel | Mapping[str, object],
+        model_type: Type[ModelT],
+        *,
+        context: str,
+    ) -> ModelT:
+        if isinstance(payload, model_type):
+            return payload
+        if isinstance(payload, BaseModel):
+            data = payload.model_dump()
+        elif isinstance(payload, Mapping):
+            data = payload
+        else:  # pragma: no cover - defensive programming
+            raise HTTPException(status_code=400, detail=f"{context} payload must be an object")
+
+        try:
+            return model_type.model_validate(data)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=exc.errors()) from exc
+
+
+    def _chunk_payload_to_content(chunk_payload: "ChunkPayload") -> ContentChunk:
+        metadata_payload = chunk_payload.metadata
+        metadata = Metadata(
+            source=metadata_payload.source,
+            page=metadata_payload.page,
+            figure=metadata_payload.figure,
+            timestamp_start=metadata_payload.timestamp_start,
+            timestamp_end=metadata_payload.timestamp_end,
+            asset_url=metadata_payload.asset_url,
+        )
+        return ContentChunk(text=chunk_payload.text, metadata=metadata)
 
 
 logger = logging.getLogger("tiktik_rag.service")
@@ -456,154 +530,291 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
     app = FastAPI(title="TikTik RAG Service")
 
-    @app.post("/ingest")
-    def ingest(request: Dict[str, object]) -> Dict[str, object]:
-        raw_chunks = request.get("chunks")
-        if not isinstance(raw_chunks, list):
-            raise HTTPException(status_code=400, detail="'chunks' must be a list")
-        replace_existing = bool(request.get("replace_existing", False))
-        chunks = [_payload_to_chunk(chunk) for chunk in raw_chunks]
-        ingested = service.ingest(chunks, replace_existing=replace_existing)
-        return {"ingested": ingested, "metrics": service.metrics_snapshot()}
+    if HAS_PYDANTIC:
 
-    @app.post("/reindex")
-    def reindex(request: Dict[str, object]) -> Dict[str, object]:
-        documents = request.get("documents")
-        if not isinstance(documents, list) or not documents:
-            raise HTTPException(status_code=400, detail="No documents supplied for re-index")
-        mapping: Dict[str, Sequence[ContentChunk]] = {}
-        for document in documents:
-            if not isinstance(document, Mapping):
-                raise HTTPException(status_code=400, detail="document entries must be objects")
-            source = document.get("source")
-            if not source:
-                raise HTTPException(status_code=400, detail="document missing 'source'")
-            raw_chunks = document.get("chunks")
-            if not isinstance(raw_chunks, list):
-                raise HTTPException(status_code=400, detail="document chunks must be a list")
-            chunk_objects = [_payload_to_chunk(chunk) for chunk in raw_chunks]
-            mapping[str(source)] = chunk_objects
-        results = service.batch_reindex(mapping)
-        return {"results": results, "metrics": service.metrics_snapshot()}
+        @app.post("/ingest", response_model=IngestResponse)
+        def ingest(request: Dict[str, object] | IngestRequest) -> Dict[str, object]:
+            payload = _parse_model(request, IngestRequest, context="ingest")
+            chunks = [_chunk_payload_to_content(chunk) for chunk in payload.chunks]
+            ingested = service.ingest(chunks, replace_existing=payload.replace_existing)
+            response = IngestResponse(ingested=ingested, metrics=service.metrics_snapshot())
+            return response.model_dump()
 
-    @app.post("/query")
-    def query(request: Dict[str, object]) -> Dict[str, object]:
-        query_text = request.get("query")
-        if not isinstance(query_text, str) or not query_text.strip():
-            raise HTTPException(status_code=400, detail="query must be a non-empty string")
-        top_k = request.get("top_k")
-        if top_k is not None and (not isinstance(top_k, int) or top_k <= 0):
-            raise HTTPException(status_code=400, detail="top_k must be a positive integer")
-        payload = service.query(query_text, top_k=top_k if isinstance(top_k, int) else None)
-        return {"answer": payload.answer, "citations": payload.citations, "assets": payload.assets}
+        @app.post("/reindex", response_model=ReindexResponse)
+        def reindex(request: Dict[str, object] | ReindexRequest) -> Dict[str, object]:
+            payload = _parse_model(request, ReindexRequest, context="reindex")
+            mapping: Dict[str, Sequence[ContentChunk]] = {}
+            for document in payload.documents:
+                mapping[document.source] = [
+                    _chunk_payload_to_content(chunk) for chunk in document.chunks
+                ]
+            results = service.batch_reindex(mapping)
+            response = ReindexResponse(results=results, metrics=service.metrics_snapshot())
+            return response.model_dump()
 
-    def _parse_nested_mapping(name: str, payload: object) -> Mapping[int, Mapping[str, str]] | None:
-        if payload is None:
-            return None
-        if not isinstance(payload, Mapping):
-            raise HTTPException(status_code=400, detail=f"{name} must be an object keyed by page")
-        normalised: Dict[int, Dict[str, str]] = {}
-        for page_key, figure_map in payload.items():
+        @app.post("/query", response_model=QueryResponse)
+        def query(request: Dict[str, object] | QueryRequest) -> Dict[str, object]:
+            payload = _parse_model(request, QueryRequest, context="query")
+            result = service.query(payload.query, top_k=payload.top_k)
+            response = QueryResponse(
+                answer=result.answer,
+                citations=result.citations,
+                assets=result.assets,
+            )
+            return response.model_dump()
+
+        @app.post("/ingest/pdf", response_model=PDFIngestResponse)
+        def ingest_pdf(request: Dict[str, object] | PDFIngestRequest) -> Dict[str, object]:
+            payload = _parse_model(request, PDFIngestRequest, context="ingest/pdf")
+
             try:
-                page = int(page_key)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail=f"{name} keys must be integers") from None
-            if not isinstance(figure_map, Mapping):
-                raise HTTPException(status_code=400, detail=f"{name}[{page}] must be an object of figure -> value")
-            normalised[page] = {str(figure): str(value) for figure, value in figure_map.items()}
-        return normalised
+                result = service.ingest_pdf_document(
+                    payload.pdf_path,
+                    payload.doc_id,
+                    captions=payload.captions,
+                    assets=payload.assets,
+                    chunk_size=payload.chunk_size,
+                    chunk_overlap=payload.chunk_overlap,
+                    replace_existing=payload.replace_existing,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:  # pragma: no cover - dependency errors
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.post("/ingest/pdf")
-    def ingest_pdf(request: Dict[str, object]) -> Dict[str, object]:
-        pdf_path = request.get("pdf_path")
-        doc_id_raw = request.get("doc_id")
-        if not isinstance(pdf_path, str) or not pdf_path.strip():
-            raise HTTPException(status_code=400, detail="pdf_path must be a non-empty string")
-        if doc_id_raw is None:
-            doc_id = None
-        elif isinstance(doc_id_raw, str) and doc_id_raw.strip():
-            doc_id = doc_id_raw
-        else:
-            raise HTTPException(status_code=400, detail="doc_id must be a non-empty string if provided")
-        captions = _parse_nested_mapping("captions", request.get("captions"))
-        assets = _parse_nested_mapping("assets", request.get("assets"))
-        chunk_size = int(request.get("chunk_size", 1000) or 1000)
-        chunk_overlap = int(request.get("chunk_overlap", 200) or 0)
-        replace_existing = bool(request.get("replace_existing", False))
-
-        try:
-            result = service.ingest_pdf_document(
-                pdf_path,
-                doc_id,
-                captions=captions,
-                assets=assets,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                replace_existing=replace_existing,
+            response = PDFIngestResponse(
+                doc_id=result.doc_id,
+                ingested=result.ingested_chunks,
+                captions=result.caption_index,
+                metrics=service.metrics_snapshot(),
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:  # pragma: no cover - dependency errors
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            return response.model_dump()
 
-        return {
-            "doc_id": result.doc_id,
-            "ingested": result.ingested_chunks,
-            "captions": result.caption_index,
-            "metrics": service.metrics_snapshot(),
-        }
+        @app.post("/ingest/media", response_model=MediaIngestResponse)
+        def ingest_media(request: Dict[str, object] | MediaIngestRequest) -> Dict[str, object]:
+            payload = _parse_model(request, MediaIngestRequest, context="ingest/media")
 
-    @app.post("/ingest/media")
-    def ingest_media(request: Dict[str, object]) -> Dict[str, object]:
-        media_path = request.get("media_path")
-        file_id_raw = request.get("file_id")
-        if not isinstance(media_path, str) or not media_path.strip():
-            raise HTTPException(status_code=400, detail="media_path must be a non-empty string")
-        if file_id_raw is None:
-            file_id = None
-        elif isinstance(file_id_raw, str) and file_id_raw.strip():
-            file_id = file_id_raw
-        else:
-            raise HTTPException(status_code=400, detail="file_id must be a non-empty string if provided")
+            try:
+                result = service.ingest_media_transcript(
+                    payload.media_path,
+                    payload.file_id,
+                    model_name=payload.model_name,
+                    word_timestamps=payload.word_timestamps,
+                    replace_existing=payload.replace_existing,
+                    chunk_size=payload.chunk_size,
+                    chunk_overlap=payload.chunk_overlap,
+                    transcribe_kwargs=dict(payload.transcribe_kwargs or {}),
+                    load_kwargs=dict(payload.load_kwargs or {}),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:  # pragma: no cover - dependency errors
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        model_name = str(request.get("model_name", "base"))
-        word_timestamps = bool(request.get("word_timestamps", False))
-        replace_existing = bool(request.get("replace_existing", False))
-        chunk_size_raw = request.get("chunk_size", 1000)
-        chunk_size = int(chunk_size_raw) if chunk_size_raw is not None else None
-        chunk_overlap = int(request.get("chunk_overlap", 200) or 0)
-
-        transcribe_kwargs = request.get("transcribe_kwargs") or {}
-        load_kwargs = request.get("load_kwargs") or {}
-        if not isinstance(transcribe_kwargs, Mapping):
-            raise HTTPException(status_code=400, detail="transcribe_kwargs must be an object if provided")
-        if not isinstance(load_kwargs, Mapping):
-            raise HTTPException(status_code=400, detail="load_kwargs must be an object if provided")
-
-        try:
-            result = service.ingest_media_transcript(
-                media_path,
-                file_id,
-                model_name=model_name,
-                word_timestamps=word_timestamps,
-                replace_existing=replace_existing,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                transcribe_kwargs=transcribe_kwargs,
-                load_kwargs=load_kwargs,
+            response = MediaIngestResponse(
+                file_id=result.file_id,
+                ingested=result.ingested_chunks,
+                transcript=result.transcription.text,
+                segments=[chunk.as_record() for chunk in result.transcription.chunks],
+                metrics=service.metrics_snapshot(),
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:  # pragma: no cover - dependency errors
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            return response.model_dump()
 
-        return {
-            "file_id": result.file_id,
-            "ingested": result.ingested_chunks,
-            "transcript": result.transcription.text,
-            "segments": [chunk.as_record() for chunk in result.transcription.chunks],
-            "metrics": service.metrics_snapshot(),
-        }
+    else:
+
+        def _parse_nested_mapping(
+            name: str, payload: object
+        ) -> Mapping[int, Mapping[str, str]] | None:
+            if payload is None:
+                return None
+            if not isinstance(payload, Mapping):
+                raise HTTPException(
+                    status_code=400, detail=f"{name} must be an object keyed by page"
+                )
+            normalised: Dict[int, Dict[str, str]] = {}
+            for page_key, figure_map in payload.items():
+                try:
+                    page = int(page_key)
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400, detail=f"{name} keys must be integers"
+                    ) from None
+                if not isinstance(figure_map, Mapping):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{name}[{page}] must be an object of figure -> value",
+                    )
+                normalised[page] = {
+                    str(figure): str(value) for figure, value in figure_map.items()
+                }
+            return normalised
+
+        @app.post("/ingest")
+        def ingest(request: Dict[str, object]) -> Dict[str, object]:
+            raw_chunks = request.get("chunks")
+            if not isinstance(raw_chunks, list):
+                raise HTTPException(status_code=400, detail="'chunks' must be a list")
+            replace_existing = bool(request.get("replace_existing", False))
+            chunks = [_payload_to_chunk(chunk) for chunk in raw_chunks]
+            ingested = service.ingest(chunks, replace_existing=replace_existing)
+            return {"ingested": ingested, "metrics": service.metrics_snapshot()}
+
+        @app.post("/reindex")
+        def reindex(request: Dict[str, object]) -> Dict[str, object]:
+            documents = request.get("documents")
+            if not isinstance(documents, list) or not documents:
+                raise HTTPException(
+                    status_code=400, detail="No documents supplied for re-index"
+                )
+            mapping: Dict[str, Sequence[ContentChunk]] = {}
+            for document in documents:
+                if not isinstance(document, Mapping):
+                    raise HTTPException(
+                        status_code=400, detail="document entries must be objects"
+                    )
+                source = document.get("source")
+                if not source:
+                    raise HTTPException(
+                        status_code=400, detail="document missing 'source'"
+                    )
+                raw_chunks = document.get("chunks")
+                if not isinstance(raw_chunks, list):
+                    raise HTTPException(
+                        status_code=400, detail="document chunks must be a list"
+                    )
+                chunk_objects = [_payload_to_chunk(chunk) for chunk in raw_chunks]
+                mapping[str(source)] = chunk_objects
+            results = service.batch_reindex(mapping)
+            return {"results": results, "metrics": service.metrics_snapshot()}
+
+        @app.post("/query")
+        def query(request: Dict[str, object]) -> Dict[str, object]:
+            query_text = request.get("query")
+            if not isinstance(query_text, str) or not query_text.strip():
+                raise HTTPException(
+                    status_code=400, detail="query must be a non-empty string"
+                )
+            top_k = request.get("top_k")
+            if top_k is not None and (not isinstance(top_k, int) or top_k <= 0):
+                raise HTTPException(
+                    status_code=400, detail="top_k must be a positive integer"
+                )
+            payload = service.query(
+                query_text, top_k=top_k if isinstance(top_k, int) else None
+            )
+            return {
+                "answer": payload.answer,
+                "citations": payload.citations,
+                "assets": payload.assets,
+            }
+
+        @app.post("/ingest/pdf")
+        def ingest_pdf(request: Dict[str, object]) -> Dict[str, object]:
+            pdf_path = request.get("pdf_path")
+            doc_id_raw = request.get("doc_id")
+            if not isinstance(pdf_path, str) or not pdf_path.strip():
+                raise HTTPException(
+                    status_code=400, detail="pdf_path must be a non-empty string"
+                )
+            if doc_id_raw is None:
+                doc_id = None
+            elif isinstance(doc_id_raw, str) and doc_id_raw.strip():
+                doc_id = doc_id_raw
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="doc_id must be a non-empty string if provided",
+                )
+            captions = _parse_nested_mapping("captions", request.get("captions"))
+            assets = _parse_nested_mapping("assets", request.get("assets"))
+            chunk_size = int(request.get("chunk_size", 1000) or 1000)
+            chunk_overlap = int(request.get("chunk_overlap", 200) or 0)
+            replace_existing = bool(request.get("replace_existing", False))
+
+            try:
+                result = service.ingest_pdf_document(
+                    pdf_path,
+                    doc_id,
+                    captions=captions,
+                    assets=assets,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                    replace_existing=replace_existing,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:  # pragma: no cover - dependency errors
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            return {
+                "doc_id": result.doc_id,
+                "ingested": result.ingested_chunks,
+                "captions": result.caption_index,
+                "metrics": service.metrics_snapshot(),
+            }
+
+        @app.post("/ingest/media")
+        def ingest_media(request: Dict[str, object]) -> Dict[str, object]:
+            media_path = request.get("media_path")
+            file_id_raw = request.get("file_id")
+            if not isinstance(media_path, str) or not media_path.strip():
+                raise HTTPException(
+                    status_code=400, detail="media_path must be a non-empty string"
+                )
+            if file_id_raw is None:
+                file_id = None
+            elif isinstance(file_id_raw, str) and file_id_raw.strip():
+                file_id = file_id_raw
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="file_id must be a non-empty string if provided",
+                )
+
+            model_name = str(request.get("model_name", "base"))
+            word_timestamps = bool(request.get("word_timestamps", False))
+            replace_existing = bool(request.get("replace_existing", False))
+            chunk_size_raw = request.get("chunk_size", 1000)
+            chunk_size = int(chunk_size_raw) if chunk_size_raw is not None else None
+            chunk_overlap = int(request.get("chunk_overlap", 200) or 0)
+
+            transcribe_kwargs = request.get("transcribe_kwargs") or {}
+            load_kwargs = request.get("load_kwargs") or {}
+            if not isinstance(transcribe_kwargs, Mapping):
+                raise HTTPException(
+                    status_code=400,
+                    detail="transcribe_kwargs must be an object if provided",
+                )
+            if not isinstance(load_kwargs, Mapping):
+                raise HTTPException(
+                    status_code=400,
+                    detail="load_kwargs must be an object if provided",
+                )
+
+            try:
+                result = service.ingest_media_transcript(
+                    media_path,
+                    file_id,
+                    model_name=model_name,
+                    word_timestamps=word_timestamps,
+                    replace_existing=replace_existing,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                    transcribe_kwargs=transcribe_kwargs,
+                    load_kwargs=load_kwargs,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:  # pragma: no cover - dependency errors
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            return {
+                "file_id": result.file_id,
+                "ingested": result.ingested_chunks,
+                "transcript": result.transcription.text,
+                "segments": [chunk.as_record() for chunk in result.transcription.chunks],
+                "metrics": service.metrics_snapshot(),
+            }
 
     @app.get("/metrics")
     def metrics() -> Dict[str, int]:
