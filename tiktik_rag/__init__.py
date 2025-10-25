@@ -5,6 +5,8 @@ from .embedding import ChunkEmbeddingPipeline, EmbeddingModel, StoredChunk, Vect
 from .metadata import Metadata, ContentChunk, Caption, CaptionKey
 from .pdf_loader import PDFLoader
 from .media_transcriber import WhisperTranscriber, TranscriptionResult
+from .retrieval import ChunkRetriever, RetrievedChunk, SimilaritySearcher, CrossEncoder
+from .response import ResponseComposer, ResponsePayload
 
 __all__ = [
     "Metadata",
@@ -20,4 +22,10 @@ __all__ = [
     "EmbeddingModel",
     "VectorStore",
     "StoredChunk",
+    "ChunkRetriever",
+    "RetrievedChunk",
+    "SimilaritySearcher",
+    "CrossEncoder",
+    "ResponseComposer",
+    "ResponsePayload",
 ]
