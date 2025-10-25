@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -35,15 +35,17 @@ class Metadata:
     figure: Optional[str] = None
     timestamp_start: Optional[float] = None
     timestamp_end: Optional[float] = None
+    asset_url: Optional[str] = None
 
-    def as_dict(self) -> Dict[str, Optional[float]]:
+    def as_dict(self) -> Dict[str, Optional[Any]]:
         """Convert the metadata into a JSON serialisable dictionary."""
-        payload: Dict[str, Optional[float]] = {
+        payload: Dict[str, Optional[Any]] = {
             "source": self.source,
             "page": self.page,
             "figure": self.figure,
             "timestamp_start": self.timestamp_start,
             "timestamp_end": self.timestamp_end,
+            "asset_url": self.asset_url,
         }
         return {key: value for key, value in payload.items() if value is not None or key == "source"}
 
