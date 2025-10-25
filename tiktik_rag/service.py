@@ -533,7 +533,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     if HAS_PYDANTIC:
 
         @app.post("/ingest", response_model=IngestResponse)
-        def ingest(request: IngestRequest) -> Dict[str, object]:
+        def ingest(request: Dict[str, object] | IngestRequest) -> Dict[str, object]:
             payload = _parse_model(request, IngestRequest, context="ingest")
             chunks = [_chunk_payload_to_content(chunk) for chunk in payload.chunks]
             ingested = service.ingest(chunks, replace_existing=payload.replace_existing)
@@ -541,7 +541,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             return response.model_dump()
 
         @app.post("/reindex", response_model=ReindexResponse)
-        def reindex(request: ReindexRequest) -> Dict[str, object]:
+        def reindex(request: Dict[str, object] | ReindexRequest) -> Dict[str, object]:
             payload = _parse_model(request, ReindexRequest, context="reindex")
             mapping: Dict[str, Sequence[ContentChunk]] = {}
             for document in payload.documents:
@@ -553,7 +553,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             return response.model_dump()
 
         @app.post("/query", response_model=QueryResponse)
-        def query(request: QueryRequest) -> Dict[str, object]:
+        def query(request: Dict[str, object] | QueryRequest) -> Dict[str, object]:
             payload = _parse_model(request, QueryRequest, context="query")
             result = service.query(payload.query, top_k=payload.top_k)
             response = QueryResponse(
@@ -564,7 +564,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             return response.model_dump()
 
         @app.post("/ingest/pdf", response_model=PDFIngestResponse)
-        def ingest_pdf(request: PDFIngestRequest) -> Dict[str, object]:
+        def ingest_pdf(request: Dict[str, object] | PDFIngestRequest) -> Dict[str, object]:
             payload = _parse_model(request, PDFIngestRequest, context="ingest/pdf")
 
             try:
@@ -591,7 +591,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             return response.model_dump()
 
         @app.post("/ingest/media", response_model=MediaIngestResponse)
-        def ingest_media(request: MediaIngestRequest) -> Dict[str, object]:
+        def ingest_media(request: Dict[str, object] | MediaIngestRequest) -> Dict[str, object]:
             payload = _parse_model(request, MediaIngestRequest, context="ingest/media")
 
             try:
