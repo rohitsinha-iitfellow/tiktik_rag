@@ -19,6 +19,9 @@ ingestion = [
     "pypdf>=3.9",
     "openai-whisper>=20231117",
 ]
+embeddings = [
+    "sentence-transformers>=2.7.0,<3.0.0",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

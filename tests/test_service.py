@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Sequence
 
 from tiktik_rag.embedding import StoredChunk
+from tiktik_rag.media_transcriber import TranscriptionResult
 from tiktik_rag.metadata import ContentChunk, Metadata
 from tiktik_rag.service import RAGService, RAGServiceConfig, create_app
 
@@ -153,4 +154,97 @@ def test_batch_reindex_honours_configuration_batches():
     ]
     assert service.metrics.ingested_documents == 1
     assert service.metrics.ingested_chunks == 4
+
+
+def test_ingest_pdf_endpoint_invokes_service():
+    model = KeywordEmbeddingModel()
+    service = RAGService(model)
+    app = create_app(service)
+    client = SimpleTestClient(app)
+
+    captured = {}
+
+    def fake_ingest_pdf_document(pdf_path, doc_id, **kwargs):
+        captured["pdf_path"] = pdf_path
+        captured["doc_id"] = doc_id
+        captured["kwargs"] = kwargs
+        return 7
+
+    service.ingest_pdf_document = fake_ingest_pdf_document  # type: ignore[assignment]
+
+    response = client.post(
+        "/ingest/pdf",
+        json={
+            "pdf_path": "/tmp/doc.pdf",
+            "doc_id": "doc-123",
+            "captions": {"1": {"A": "Caption text"}},
+            "assets": {1: {"A": "http://example/fig"}},
+            "chunk_size": 500,
+            "chunk_overlap": 50,
+            "replace_existing": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ingested"] == 7
+    assert captured["pdf_path"] == "/tmp/doc.pdf"
+    assert captured["doc_id"] == "doc-123"
+    assert captured["kwargs"]["captions"] == {1: {"A": "Caption text"}}
+    assert captured["kwargs"]["assets"] == {1: {"A": "http://example/fig"}}
+    assert captured["kwargs"]["chunk_size"] == 500
+    assert captured["kwargs"]["chunk_overlap"] == 50
+    assert captured["kwargs"]["replace_existing"] is True
+
+
+def test_ingest_media_endpoint_invokes_service():
+    model = KeywordEmbeddingModel()
+    service = RAGService(model)
+    app = create_app(service)
+    client = SimpleTestClient(app)
+
+    segments = [
+        ContentChunk(text="hello", metadata=Metadata(source="file", timestamp_start=0.0, timestamp_end=1.0))
+    ]
+    transcript_result = TranscriptionResult(text="hello", chunks=segments, raw={})
+
+    captured = {}
+
+    def fake_ingest_media_transcript(media_path, file_id, **kwargs):
+        captured["media_path"] = media_path
+        captured["file_id"] = file_id
+        captured["kwargs"] = kwargs
+        return transcript_result, 3
+
+    service.ingest_media_transcript = fake_ingest_media_transcript  # type: ignore[assignment]
+
+    response = client.post(
+        "/ingest/media",
+        json={
+            "media_path": "/tmp/audio.mp3",
+            "file_id": "audio-1",
+            "model_name": "base",
+            "word_timestamps": True,
+            "replace_existing": True,
+            "chunk_size": None,
+            "chunk_overlap": 0,
+            "transcribe_kwargs": {"temperature": 0.2},
+            "load_kwargs": {"device": "cpu"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ingested"] == 3
+    assert payload["transcript"] == "hello"
+    assert len(payload["segments"]) == 1
+    assert payload["segments"][0]["metadata"]["timestamp_end"] == 1.0
+    assert captured["media_path"] == "/tmp/audio.mp3"
+    assert captured["file_id"] == "audio-1"
+    assert captured["kwargs"]["model_name"] == "base"
+    assert captured["kwargs"]["word_timestamps"] is True
+    assert captured["kwargs"]["replace_existing"] is True
+    assert captured["kwargs"]["chunk_size"] is None
+    assert captured["kwargs"]["transcribe_kwargs"] == {"temperature": 0.2}
+    assert captured["kwargs"]["load_kwargs"] == {"device": "cpu"}
 
